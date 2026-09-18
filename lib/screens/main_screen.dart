@@ -1,6 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../providers/app_state_provider.dart';
 import '../theme/app_theme.dart';
 import 'dashboard_screen.dart';
+import 'network_screen.dart';
 import 'settings_screen.dart';
 
 /// Which tab is selected is local, screen-specific UI state that has
@@ -15,11 +20,54 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
+  late final AppStateProvider _appState;
+  NetworkStatus? _lastNetworkStatus;
+  NetworkStatus? _notificationStatus;
+  Timer? _notificationTimer;
 
-  static const _screens = [
+  static const _screens = <Widget>[
     DashboardScreen(),
+    NetworkScreen(),
     SettingsScreen(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _appState = context.read<AppStateProvider>();
+    _lastNetworkStatus = _appState.networkStatus;
+    _appState.addListener(_showConnectivityNotification);
+  }
+
+  void _showConnectivityNotification() {
+    final status = _appState.networkStatus;
+    if (!mounted ||
+        status == _lastNetworkStatus ||
+        status == NetworkStatus.checking) {
+      return;
+    }
+    _lastNetworkStatus = status;
+    _notificationTimer?.cancel();
+    setState(() => _notificationStatus = status);
+    _notificationTimer = Timer(const Duration(seconds: 5), _dismissNotification);
+  }
+
+  void _dismissNotification() {
+    if (!mounted) return;
+    setState(() => _notificationStatus = null);
+  }
+
+  void _dismissNotificationNow() {
+    _notificationTimer?.cancel();
+    _dismissNotification();
+  }
+
+  @override
+  void dispose() {
+    _notificationTimer?.cancel();
+    _appState.removeListener(_showConnectivityNotification);
+    super.dispose();
+  }
 
   void _onTabTapped(int index) {
     setState(() => _currentIndex = index);
@@ -30,7 +78,21 @@ class _MainScreenState extends State<MainScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      body: IndexedStack(index: _currentIndex, children: _screens),
+      body: Stack(
+        children: [
+          IndexedStack(index: _currentIndex, children: _screens),
+          if (_notificationStatus case final status?)
+            Positioned(
+              top: MediaQuery.paddingOf(context).top + 8,
+              left: 16,
+              right: 16,
+              child: _ConnectivityBanner(
+                status: status,
+                onDismiss: _dismissNotificationNow,
+              ),
+            ),
+        ],
+      ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: isDark ? AppColors.darkNavBg : AppColors.navBg,
@@ -55,14 +117,106 @@ class _MainScreenState extends State<MainScreen> {
                   onTap: () => _onTabTapped(0),
                 ),
                 _NavItem(
-                  icon: Icons.settings_rounded,
-                  label: 'Settings',
+                  icon: Icons.public_rounded,
+                  label: 'Network',
                   isActive: _currentIndex == 1,
                   onTap: () => _onTabTapped(1),
+                ),
+                _NavItem(
+                  icon: Icons.settings_rounded,
+                  label: 'Settings',
+                  isActive: _currentIndex == 2,
+                  onTap: () => _onTabTapped(2),
                 ),
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ConnectivityBanner extends StatelessWidget {
+  final NetworkStatus status;
+  final VoidCallback onDismiss;
+
+  const _ConnectivityBanner({required this.status, required this.onDismiss});
+
+  @override
+  Widget build(BuildContext context) {
+    final isOffline = status == NetworkStatus.offline;
+    final accent = isOffline ? const Color(0xFFD93025) : const Color(0xFF16803A);
+    final surface = isOffline ? const Color(0xFFFFF4F2) : const Color(0xFFF0FBF3);
+    final title = isOffline ? 'Connection lost' : 'Connection restored';
+    final message = isOffline
+        ? 'Requests will be queued until you are back online.'
+        : 'You are connected to ${status == NetworkStatus.wifi ? 'Wi-Fi' : 'Cellular Data'}.';
+
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+        decoration: BoxDecoration(
+          color: surface,
+          border: Border.all(color: accent.withAlpha(65)),
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x22000000),
+              blurRadius: 14,
+              offset: Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: accent.withAlpha(25),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                isOffline ? Icons.wifi_off_rounded : Icons.wifi_rounded,
+                color: accent,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: accent,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    message,
+                    style: const TextStyle(
+                      color: AppColors.textGray,
+                      fontSize: 11,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              onPressed: onDismiss,
+              tooltip: 'Dismiss notification',
+              icon: const Icon(Icons.close_rounded, size: 19),
+              color: AppColors.textGray,
+              visualDensity: VisualDensity.compact,
+            ),
+          ],
         ),
       ),
     );

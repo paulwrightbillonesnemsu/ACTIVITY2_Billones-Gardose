@@ -5,26 +5,60 @@
 // gestures. You can also use WidgetTester to find child widgets in the widget
 // tree, read text, and verify that the values of widget properties are correct.
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:provider/provider.dart';
 
 import 'package:flutter_lab_portfolio/main.dart';
+import 'package:flutter_lab_portfolio/providers/app_state_provider.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('shows the network monitor tab', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      ChangeNotifierProvider(
+        create: (_) => AppStateProvider(),
+        child: const MyApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    expect(find.text('Dashboard'), findsOneWidget);
+    await tester.tap(find.text('Network'));
+    await tester.pumpAndSettle();
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
+    expect(find.text('Network Monitor'), findsOneWidget);
+    expect(find.text('Current Network'), findsOneWidget);
+    expect(find.text('Dataset Download'), findsOneWidget);
+  });
+
+  testWidgets('queues requests offline and sends them after reconnection',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(
+      ChangeNotifierProvider(
+        create: (_) => AppStateProvider(),
+        child: const MyApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Network'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Simulate Loss'));
+    await tester.pump();
+    await tester.tap(find.text('Start Request'));
     await tester.pump();
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(find.text('Waiting for network'), findsOneWidget);
+    expect(find.text('Dataset Download'), findsWidgets);
+
+    final appState = tester.element(find.byType(MyApp)).read<AppStateProvider>();
+    await tester.tap(find.text('Restore Network'));
+    await tester.pump();
+    appState.setNetworkStatusForTesting(NetworkStatus.wifi);
+    await tester.pump();
+    expect(find.text('Sending request'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(find.text('1 request sent successfully'), findsOneWidget);
+    expect(find.text('Sent successfully'), findsOneWidget);
   });
 }
